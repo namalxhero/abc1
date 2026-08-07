@@ -1,32 +1,40 @@
 package com.example.lockdownapp
 
+import android.Manifest
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.button.MaterialButton
+import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.google.android.material.button.MaterialButton
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var devicePolicyManager: DevicePolicyManager
     private lateinit var componentName: ComponentName
     private lateinit var tvTimer: TextView
+    private lateinit var etMinutes: EditText
+    private lateinit var btnSetTime: MaterialButton
     private lateinit var btnStart: MaterialButton
     private lateinit var btnPause: MaterialButton
-    private lateinit var btnEmergency: MaterialButton
+    private lateinit var btnCallMom: MaterialButton
+    private lateinit var btnCallDad: MaterialButton
     private lateinit var webViewYoutube: WebView
 
     private var countDownTimer: CountDownTimer? = null
-    private var timeLeftInMillis: Long = 3600000 // Default 1 hour educational session
+    private var timeLeftInMillis: Long = 3600000 // Default 60 mins
     private var isTimerRunning = false
     private var isSessionCompleted = false
 
@@ -35,27 +43,38 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         tvTimer = findViewById(R.id.tvTimer)
+        etMinutes = findViewById(R.id.etMinutes)
+        btnSetTime = findViewById(R.id.btnSetTime)
         btnStart = findViewById(R.id.btnStart)
         btnPause = findViewById(R.id.btnPause)
-        btnEmergency = findViewById(R.id.btnEmergency)
+        btnCallMom = findViewById(R.id.btnCallMom)
+        btnCallDad = findViewById(R.id.btnCallDad)
         webViewYoutube = findViewById(R.id.webViewYoutube)
 
         devicePolicyManager = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         componentName = ComponentName(this, MyAdminReceiver::class.java)
 
-        checkDeviceAdminPermission()
+        // Request all permissions immediately upon app startup
+        requestAllPermissions()
+
         setupYouTubePlayer()
-        setupTimerLogic()
-        setupEmergencySection()
+        setupTimerControls()
+        setupFamilyCalls()
     }
 
-    private fun checkDeviceAdminPermission() {
+    private fun requestAllPermissions() {
+        // Request Device Admin Permission
         if (!devicePolicyManager.isAdminActive(componentName)) {
             val intent = Intent(DevicePolicyManager.ACTION_ADD_ADMIN).apply {
                 putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, componentName)
-                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "This app requires Administrator permissions to enforce the lockdown state and prevent bypassing.")
+                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Admin permission is required to enforce study lockdown and prevent bypassing.")
             }
             startActivityForResult(intent, 100)
+        }
+
+        // Request Phone Call Permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CALL_PHONE), 1)
         }
     }
 
@@ -69,29 +88,55 @@ class MainActivity : AppCompatActivity() {
                     if (it.contains("youtube.com") || it.contains("youtu.be")) {
                         view?.loadUrl(it)
                     } else {
-                        Toast.makeText(applicationContext, "Non-educational links are blocked.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(applicationContext, "Only educational content is allowed.", Toast.LENGTH_SHORT).show()
                     }
                 }
                 return true
             }
         }
-        webViewYoutube.loadUrl("https://www.youtube.com/results?search_query=educational+lectures+stem")
+        webViewYoutube.loadUrl("https://www.youtube.com/results?search_query=educational+lectures+science+math")
     }
 
-    private fun setupTimerLogic() {
-        btnStart.setOnClickListener {
+    private fun setupTimerControls() {
+        updateTimerText()
+
+        btnSetTime.setOnClickListener {
             if (!isTimerRunning) {
-                startTimer()
+                val inputStr = etMinutes.text.toString()
+                if (inputStr.isNotEmpty()) {
+                    val mins = inputStr.toLong()
+                    timeLeftInMillis = mins * 60 * 1000
+                    updateTimerText()
+                    Toast.makeText(this, "Timer set to $mins minutes", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(this, "Cannot change time while timer is active!", Toast.LENGTH_SHORT).show()
             }
         }
 
+        // Start and Resume combined into the same button functionality based on state
+        btnStart.setOnClickListener {
+            if (!isTimerRunning && !isSessionCompleted) {
+                startTimer(timeLeftInMillis)
+                btnStart.text = "Running..."
+                btnStart.isEnabled = false
+            }
+        }
+
+        // Pause functionality: Stops timer and keeps remaining time so it resumes from where it stopped
         btnPause.setOnClickListener {
-            showRestrictedActionDialog()
+            if (isTimerRunning) {
+                countDownTimer?.cancel()
+                isTimerRunning = false
+                btnStart.text = "Resume"
+                btnStart.isEnabled = true
+                Toast.makeText(this, "Timer Paused. App remains locked.", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
-    private fun startTimer() {
-        countDownTimer = object : CountDownTimer(timeLeftInMillis, 1000) {
+    private fun startTimer(millis: Long) {
+        countDownTimer = object : CountDownTimer(millis, 1000) {
             override fun onTick(millisUntilFinished: Long) {
                 timeLeftInMillis = millisUntilFinished
                 updateTimerText()
@@ -101,12 +146,13 @@ class MainActivity : AppCompatActivity() {
                 isTimerRunning = false
                 isSessionCompleted = true
                 tvTimer.text = "00:00:00"
-                Toast.makeText(applicationContext, "Study Session Completed! App Unlocked.", Toast.LENGTH_LONG).show()
+                btnStart.text = "Completed"
                 btnStart.isEnabled = false
+                Toast.makeText(applicationContext, "Session Finished! App Unlocked.", Toast.LENGTH_LONG).show()
             }
         }.start()
         isTimerRunning = true
-        Toast.makeText(this, "Lockdown Started. App cannot be closed.", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Study Lockdown Active!", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateTimerText() {
@@ -116,33 +162,33 @@ class MainActivity : AppCompatActivity() {
         tvTimer.text = String.format("%02d:%02d:%02d", hours, minutes, seconds)
     }
 
-    private fun showRestrictedActionDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Restriction Active")
-            .setMessage("You cannot stop or pause the educational timer until the full session countdown finishes.")
-            .setPositiveButton("Understood", null)
-            .show()
+    private fun setupFamilyCalls() {
+        btnCallMom.setOnClickListener {
+            makePhoneCall("0712345678") // Replace with Amma's phone number
+        }
+
+        btnCallDad.setOnClickListener {
+            makePhoneCall("0771234567") // Replace with Thatha's phone number
+        }
     }
 
-    private fun setupEmergencySection() {
-        btnEmergency.setOnClickListener {
-            val builder = AlertDialog.Builder(this)
-            builder.setTitle("Emergency Call Portal")
-            builder.setMessage("Select an emergency action:")
-            builder.setPositiveButton("Call Emergency Services") { _, _ ->
-                val intent = Intent(Intent.ACTION_DIAL).apply {
-                    data = android.net.Uri.parse("tel:119")
-                }
-                startActivity(intent)
+    private fun makePhoneCall(phoneNumber: String) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+            val intent = Intent(Intent.ACTION_CALL).apply {
+                data = Uri.parse("tel:$phoneNumber")
             }
-            builder.setNegativeButton("Cancel", null)
-            builder.show()
+            startActivity(intent)
+        } else {
+            val intent = Intent(Intent.ACTION_DIAL).apply {
+                data = Uri.parse("tel:$phoneNumber")
+            }
+            startActivity(intent)
         }
     }
 
     override fun onBackPressed() {
         if (!isSessionCompleted) {
-            Toast.makeText(this, "Study Lockdown Active. Complete the timer to exit.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Study Lockdown Active! You cannot exit until session is completed.", Toast.LENGTH_SHORT).show()
         } else {
             super.onBackPressed()
         }
