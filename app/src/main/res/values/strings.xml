@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Lockdown Study App</string>
+    <string name="device_admin_description">This app requires Device Administrator privileges to enforce study lockdown and prevent bypassing.</string>
+</resources>
+
