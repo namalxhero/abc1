@@ -1,136 +1,75 @@
-package com.example.lockdownapp
+package com.lockdown.app
 
-import android.Manifest
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.CountDownTimer
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import com.google.android.material.button.MaterialButton
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var devicePolicyManager: DevicePolicyManager
-    private lateinit var componentName: ComponentName
     private lateinit var tvTimer: TextView
-    private lateinit var etMinutes: EditText
-    private lateinit var btnSetTime: MaterialButton
-    private lateinit var btnStart: MaterialButton
-    private lateinit var btnPause: MaterialButton
-    private lateinit var btnCallMom: MaterialButton
-    private lateinit var btnCallDad: MaterialButton
-    private lateinit var webViewYoutube: WebView
+    private lateinit var btnStart: Button
+    private lateinit var btnPause: Button
+    private lateinit var etYtSearch: EditText
+    private lateinit var btnYtSearch: Button
+    private lateinit var tvYtResult: TextView
+    private lateinit var btnCallAmma: Button
+    private lateinit var btnCallThatha: Button
 
     private var countDownTimer: CountDownTimer? = null
-    private var timeLeftInMillis: Long = 3600000 
+    private var timeLeftInMillis: Long = 60000 // 1 Minute
     private var isTimerRunning = false
-    private var isSessionCompleted = false
+
+    // Blocked Keywords for Games & Entertainment
+    private val blockedKeywords = listOf("game", "pubg", "freefire", "movie", "song", "cartoons", "fun", "tiktok", "match")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         tvTimer = findViewById(R.id.tvTimer)
-        etMinutes = findViewById(R.id.etMinutes)
-        btnSetTime = findViewById(R.id.btnSetTime)
         btnStart = findViewById(R.id.btnStart)
         btnPause = findViewById(R.id.btnPause)
-        btnCallMom = findViewById(R.id.btnCallMom)
-        btnCallDad = findViewById(R.id.btnCallDad)
-        webViewYoutube = findViewById(R.id.webViewYoutube)
+        etYtSearch = findViewById(R.id.etYtSearch)
+        btnYtSearch = findViewById(R.id.btnYtSearch)
+        tvYtResult = findViewById(R.id.tvYtResult)
+        btnCallAmma = findViewById(R.id.btnCallAmma)
+        btnCallThatha = findViewById(R.id.btnCallThatha)
 
-        devicePolicyManager = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        componentName = ComponentName(this, MyAdminReceiver::class.java)
-
-        requestAllPermissions()
-        setupYouTubePlayer()
-        setupTimerControls()
-        setupFamilyCalls()
-    }
-
-    private fun requestAllPermissions() {
-        if (!devicePolicyManager.isAdminActive(componentName)) {
-            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, componentName)
-                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Admin permission is required to enforce study lockdown and prevent bypassing.")
-            }
-            startActivityForResult(intent, 100)
-        }
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CALL_PHONE), 1)
-        }
-    }
-
-    private fun setupYouTubePlayer() {
-        webViewYoutube.settings.javaScriptEnabled = true
-        webViewYoutube.settings.domStorageEnabled = true
-        webViewYoutube.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-        webViewYoutube.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                url?.let {
-                    if (it.contains("youtube.com") || it.contains("youtu.be")) {
-                        view?.loadUrl(it)
-                    } else {
-                        Toast.makeText(applicationContext, "Only educational content is allowed.", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                return true
-            }
-        }
-        webViewYoutube.loadUrl("https://www.youtube.com/results?search_query=educational+lectures+science+math")
-    }
-
-    private fun setupTimerControls() {
-        updateTimerText()
-
-        btnSetTime.setOnClickListener {
-            if (!isTimerRunning) {
-                val inputStr = etMinutes.text.toString()
-                if (inputStr.isNotEmpty()) {
-                    val mins = inputStr.toLong()
-                    timeLeftInMillis = mins * 60 * 1000
-                    updateTimerText()
-                    Toast.makeText(this, "Timer set to $mins minutes", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                Toast.makeText(this, "Cannot change time while timer is active!", Toast.LENGTH_SHORT).show()
-            }
-        }
-
+        // 1. Timer Start Button
         btnStart.setOnClickListener {
-            if (!isTimerRunning && !isSessionCompleted) {
-                startTimer(timeLeftInMillis)
-                btnStart.text = "Running..."
-                btnStart.isEnabled = false
-            }
+            startTimer()
         }
 
+        // 2. Timer Pause Button (Works ONLY when running)
         btnPause.setOnClickListener {
-            if (isTimerRunning) {
-                countDownTimer?.cancel()
-                isTimerRunning = false
-                btnStart.text = "Resume"
-                btnStart.isEnabled = true
-                Toast.makeText(this, "Timer Paused. App remains locked.", Toast.LENGTH_SHORT).show()
-            }
+            pauseTimer()
+        }
+
+        // 3. YouTube Search Filter
+        btnYtSearch.setOnClickListener {
+            val query = etYtSearch.text.toString().lowercase().trim()
+            validateYouTubeSearch(query)
+        }
+
+        // 4. Emergency Calls (Custom Numbers from SharedPreferences)
+        btnCallAmma.setOnClickListener {
+            makeEmergencyCall("amma_number", "0712345678")
+        }
+
+        btnCallThatha.setOnClickListener {
+            makeEmergencyCall("thatha_number", "0771234567")
         }
     }
 
-    private fun startTimer(millis: Long) {
-        countDownTimer = object : CountDownTimer(millis, 1000) {
+    private fun startTimer() {
+        countDownTimer = object : CountDownTimer(timeLeftInMillis, 1000) {
             override fun onTick(millisUntilFinished: Long) {
                 timeLeftInMillis = millisUntilFinished
                 updateTimerText()
@@ -138,53 +77,57 @@ class MainActivity : AppCompatActivity() {
 
             override fun onFinish() {
                 isTimerRunning = false
-                isSessionCompleted = true
-                tvTimer.text = "00:00:00"
-                btnStart.text = "Completed"
-                btnStart.isEnabled = false
-                Toast.makeText(applicationContext, "Session Finished! App Unlocked.", Toast.LENGTH_LONG).show()
+                btnStart.isEnabled = true
+                btnPause.isEnabled = false
+                Toast.classInvokeSafely("Study session completed!")
             }
         }.start()
+
         isTimerRunning = true
-        Toast.makeText(this, "Study Lockdown Active!", Toast.LENGTH_SHORT).show()
+        btnStart.isEnabled = false
+        btnPause.isEnabled = true // Enable Pause ONLY when running
+    }
+
+    private fun pauseTimer() {
+        countDownTimer?.cancel()
+        isTimerRunning = false
+        btnStart.isEnabled = true
+        btnPause.isEnabled = false // Disable when paused
     }
 
     private fun updateTimerText() {
-        val hours = (timeLeftInMillis / 1000) / 3600
-        val minutes = ((timeLeftInMillis / 1000) % 3600) / 60
+        val minutes = (timeLeftInMillis / 1000) / 60
         val seconds = (timeLeftInMillis / 1000) % 60
-        tvTimer.text = String.format("%02d:%02d:%02d", hours, minutes, seconds)
+        tvTimer.text = String.format("%02d:%02d:%02d", 0, minutes, seconds)
     }
 
-    private fun setupFamilyCalls() {
-        btnCallMom.setOnClickListener {
-            makePhoneCall("0712345678")
-        }
-
-        btnCallDad.setOnClickListener {
-            makePhoneCall("0771234567")
-        }
-    }
-
-    private fun makePhoneCall(phoneNumber: String) {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-            val intent = Intent(Intent.ACTION_CALL).apply {
-                data = Uri.parse("tel:$phoneNumber")
-            }
-            startActivity(intent)
-        } else {
-            val intent = Intent(Intent.ACTION_DIAL).apply {
-                data = Uri.parse("tel:$phoneNumber")
-            }
-            startActivity(intent)
-        }
-    }
-
+    // FULL LOCKDOWN: Back Button Block when Timer is Running
     override fun onBackPressed() {
-        if (!isSessionCompleted) {
-            Toast.makeText(this, "Study Lockdown Active! You cannot exit until session is completed.", Toast.LENGTH_SHORT).show()
+        if (isTimerRunning) {
+            Toast.makeText(this, "🔒 Lockdown Active! You cannot exit or go back.", Toast.LENGTH_SHORT).show()
         } else {
             super.onBackPressed()
         }
+    }
+
+    private fun validateYouTubeSearch(query: String) {
+        val isBlocked = blockedKeywords.any { query.contains(it) }
+        if (isBlocked) {
+            tvYtResult.text = "🚫 Access Blocked! Games and fun are not allowed."
+        } else if (query.isEmpty()) {
+            tvYtResult.text = "Please enter an educational topic."
+        } else {
+            tvYtResult.text = "✅ Showing educational results for: '$query'"
+        }
+    }
+
+    private fun makeEmergencyCall(key: String, defaultNum: String) {
+        val prefs = getSharedPreferences("StudyAppPrefs", Context.MODE_PRIVATE)
+        val number = prefs.getString(key, defaultNum)
+
+        val intent = Intent(Intent.ACTION_DIAL).apply {
+            data = Uri.parse("tel:$number")
+        }
+        startActivity(intent)
     }
 }
